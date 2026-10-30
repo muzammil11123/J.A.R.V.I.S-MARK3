@@ -8,6 +8,7 @@ import {
 } from '../config'
 import * as kokoro from './kokoro'
 import { caps } from './capabilities'
+import { getSettings } from './settings'
 
 /**
  * Speech output.
@@ -182,8 +183,18 @@ function score(v: SpeechSynthesisVoice): number {
   if (n.startsWith('daniel')) s += 100
   else if (n.includes('google uk english male')) s += 85
   else if (/\b(oliver|arthur|jamie|malcolm)\b/.test(n)) s += 80
+  // Windows' built-in male voices. George is the en-GB one; the rest ship with
+  // the common English language packs.
+  else if (/microsoft (george|ryan)\b/.test(n)) s += 85
+  else if (/microsoft (ravi|david|mark|guy)\b/.test(n)) s += 60
   // Newer macOS en-GB male voices — casual, but serviceable.
   else if (/\b(reed|rocko|eddy)\b/.test(n)) s += 40
+
+  // Network voices (Google's on Chrome, the "Online (Natural)" ones on Edge)
+  // stream from a server, and routinely miss the 700ms start watchdog below —
+  // which reads as a wedged engine and leaves dead air after every sentence.
+  // A local voice starts instantly, so it wins whenever there is one.
+  if (!v.localService) s -= 40
 
   // Higher-quality variants of whatever matched above.
   if (n.includes('premium')) s += 30
@@ -262,6 +273,24 @@ export function cycleVoice(): string {
   localStorage.setItem(VOICE_PREF_KEY, next.name)
   cachedVoice = next
   return next.name
+}
+
+/** Pick a voice by name from the console's list. False if it is not installed. */
+export function chooseVoice(name: string): boolean {
+  const hit = speechSynthesis.getVoices().find((v) => v.name === name)
+  if (!hit) return false
+  try {
+    localStorage.setItem(VOICE_PREF_KEY, hit.name)
+  } catch {
+    /* this session only */
+  }
+  cachedVoice = hit
+  return true
+}
+
+/** Where speech output is produced, for the privacy readout. */
+export function speechOutputIsCloud(): boolean {
+  return USE_ELEVENLABS || caps().tts
 }
 
 // Voices load asynchronously in Chrome; the first call usually returns nothing.
@@ -437,6 +466,9 @@ export function createSpeaker(): Speaker {
 
       const spoke = await speakNative(item.text)
       if (spoke || cancelled) return
+      // No ElevenLabs key means there is no cloud voice to rescue with, and
+      // latching over to it would only add a failed request to every sentence.
+      if (!caps().tts) return
 
       // The OS voice produced no sound. That is not recoverable by retrying it,
       // so latch it off and rescue this sentence through the bridge's speech
@@ -480,8 +512,9 @@ export function createSpeaker(): Speaker {
       u.lang = voice?.lang ?? 'en-GB'
       // Deliberate, and deliberately invariant — the character's pace does not
       // change with stakes, and that steadiness is most of the effect. This
-      // lands around 130 wpm, below the median for film dialogue.
-      u.rate = 0.92
+      // lands around 130 wpm, below the median for film dialogue. The
+      // console can change it; the default is that pace.
+      u.rate = getSettings().rate
       // Mid-baritone, and *not* pushed lower for gravitas. The voice is
       // clarity-weighted rather than chest-weighted; dropping it further reads
       // as a film-trailer voiceover, which is the wrong character entirely.

@@ -44,7 +44,53 @@ function vendorWasm() {
   }
 }
 
-const writes = process.argv.includes('--writes')
+/**
+ * The face models, for the same two reasons and one more: these are a picture
+ * of who you are, and the models that read it should come from this machine,
+ * not be fetched from someone else's server each time the camera opens. Only
+ * the five the identity check uses — detector, mesh, descriptor, anti-spoof
+ * and liveness — about 10 MB, rather than the library's whole 28 MB shelf.
+ */
+const FACE_MODELS = ['blazeface', 'facemesh', 'faceres', 'antispoof', 'liveness']
+function vendorFaceModels() {
+  const from = 'node_modules/@vladmandic/human/models'
+  const to = 'public/human-models'
+  if (!existsSync(from)) return // face recognition is optional; carry on without it
+  if (FACE_MODELS.every((m) => existsSync(`${to}/${m}.bin`))) return
+  try {
+    mkdirSync(to, { recursive: true })
+    for (const m of FACE_MODELS) {
+      cpSync(`${from}/${m}.json`, `${to}/${m}.json`)
+      cpSync(`${from}/${m}.bin`, `${to}/${m}.bin`)
+    }
+    console.log('  vendored the face-recognition models into public/human-models.')
+  } catch (err) {
+    console.warn(`  could not vendor the face-recognition models: ${err.message}`)
+  }
+}
+
+/**
+ * --desktop is --writes plus every local drive. Writes alone lets JARVIS act,
+ * but the bridge's /file endpoint still only serves the home and temp
+ * directories, so a screenshot or video on another drive would never reach the
+ * display.
+ *
+ * --fast trades depth for pace: Haiku at low effort. Measured on this bridge it
+ * reaches the first spoken word in about half Sonnet's time on a session's
+ * first answer, and a little sooner after that. Either can still be
+ * overridden with JARVIS_MODEL and JARVIS_EFFORT (claude-sonnet-5-5 for more
+ * careful multi-step work).
+ */
+const desktop = process.argv.includes('--desktop')
+const writes = desktop || process.argv.includes('--writes')
+const fast = process.argv.includes('--fast')
+
+function localDrives() {
+  if (process.platform !== 'win32') return ['/']
+  return [...'CDEFGHIJKLMNOPQRSTUVWXYZ']
+    .map((l) => `${l}:\\`)
+    .filter((d) => existsSync(d))
+}
 
 // A dim label per process, so the interleaved logs stay readable.
 const paint = (tag, colour) => (line) =>
@@ -106,15 +152,28 @@ process.on('SIGTERM', () => shutdown(0))
  */
 const port = process.env.PORT
 const bridgeEnv = writes ? { JARVIS_ALLOW_WRITES: '1' } : {}
+if (fast) {
+  bridgeEnv.JARVIS_MODEL = process.env.JARVIS_MODEL ?? 'claude-haiku-5-5'
+  bridgeEnv.JARVIS_EFFORT = process.env.JARVIS_EFFORT ?? 'low'
+}
+if (desktop) {
+  bridgeEnv.JARVIS_FILE_ROOTS = [process.env.JARVIS_FILE_ROOTS, ...localDrives()]
+    .filter(Boolean)
+    .join(',')
+  console.log(`  desktop mode: JARVIS can act, and read from ${localDrives().join(' ')}`)
+}
 if (port) {
   bridgeEnv.JARVIS_ALLOWED_ORIGINS = `http://localhost:${port},http://127.0.0.1:${port}`
   console.log(`  serving the face on port ${port}; the bridge will accept it.\n`)
 }
 
 vendorWasm()
+vendorFaceModels()
 
 console.log('\nJ.A.R.V.I.S. starting — the brain and the face.\n')
-run('bridge', 'node', ['bridge/server.mjs'], '36', bridgeEnv)
+// This same Node, not whatever `node` PATH finds: at sign-in, from Task
+// Scheduler, PATH is not guaranteed to be the one a terminal has.
+run('bridge', process.execPath, ['bridge/server.mjs'], '36', bridgeEnv)
 // npm is a shell script on most systems; call the vite binary directly so we do
 // not need shell:true (which would break the argument handling above).
 run('face', process.execPath, ['node_modules/vite/bin/vite.js'], '35', {})

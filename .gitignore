@@ -25,3 +25,10 @@ dist-ssr
 
 # Copied out of node_modules by scripts/start.mjs — 34MB of build output.
 public/mediapipe/
+# Likewise the face-recognition models (scripts/start.mjs).
+public/human-models/
+
+# Bridge secrets (Google, WhatsApp, Home Assistant). Never commit these.
+.env
+.env.*
+!.env.example

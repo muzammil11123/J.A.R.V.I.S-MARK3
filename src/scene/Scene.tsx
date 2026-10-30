@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { Component, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import {
   EffectComposer,
@@ -192,12 +192,102 @@ function Rig() {
   )
 }
 
+/**
+ * Whether this browser can hand out a WebGL context at all.
+ *
+ * Chrome switches the GPU off for the rest of its session after the GPU
+ * process crashes a few times (the log then reads "GL_VENDOR = Disabled"), and
+ * r3f's answer to that is an unhandled rejection and an empty canvas — the
+ * middle of the HUD simply goes black. Asking first lets the scene step aside
+ * for the flat reactor below instead.
+ */
+function webglAvailable(): boolean {
+  try {
+    const probe = document.createElement('canvas')
+    const gl = probe.getContext('webgl2') ?? probe.getContext('webgl')
+    if (!gl) return false
+    gl.getExtension('WEBGL_lose_context')?.loseContext()
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The reactor without a GPU: a CSS ring in the same accent colour, breathing
+ * with the same phase. Plainer than the real thing, but present — a blank
+ * centre reads as JARVIS being broken, which it isn't.
+ */
+function FlatReactor() {
+  const accent = useStore((s) => accentFor(s.phase, s.ui))
+  const phase = useStore((s) => s.phase)
+  const busy = phase === 'thinking' || phase === 'tooling' || phase === 'waking' || phase === 'boot'
+  return (
+    <div className="scene scene-flat" aria-hidden="true">
+      <div
+        className={`scene-flat-core${busy ? ' busy' : ''}`}
+        style={{ '--accent': accent } as CSSProperties}
+      />
+    </div>
+  )
+}
+
+/** Catches a renderer that fails after the probe said yes. */
+class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  componentDidCatch(err: unknown) {
+    console.warn('[jarvis] 3D scene unavailable, using the flat reactor:', err)
+  }
+  render() {
+    return this.state.failed ? <FlatReactor /> : this.props.children
+  }
+}
+
 export function Scene() {
+  const [gl, setGl] = useState(webglAvailable)
+  const [attempt, setAttempt] = useState(0)
+  // The flat ring is a stopgap, not a verdict: keep asking, and bring the
+  // reactor back as soon as the browser hands out a context again.
+  useEffect(() => {
+    if (gl) return
+    const t = setInterval(() => {
+      if (!webglAvailable()) return
+      setAttempt((n) => n + 1)
+      setGl(true)
+    }, 5000)
+    return () => clearInterval(t)
+  }, [gl])
+  if (!gl) return <FlatReactor />
+  return (
+    <SceneBoundary key={attempt}>
+      <LiveScene onFail={() => setGl(false)} />
+    </SceneBoundary>
+  )
+}
+
+function LiveScene({ onFail }: { onFail: () => void }) {
   return (
     <Canvas
       className="scene"
       camera={{ position: [0, 0, 6.2], fov: 45 }}
-      gl={{ antialias: true, alpha: true }}
+      // r3f builds the renderer in an async call nobody awaits, so a refused
+      // context is an unhandled rejection the boundary never sees — and the
+      // Canvas retries it on every re-render. Building it here is the one
+      // place the failure can be caught and handed to the flat reactor.
+      gl={async (props) => {
+        try {
+          return new THREE.WebGLRenderer({ ...props, antialias: true, alpha: true })
+        } catch (err) {
+          console.warn('[jarvis] WebGL refused, using the flat reactor:', err)
+          onFail()
+          // Never settles: the Canvas is about to unmount, and a rejection
+          // here would only be reported as unhandled.
+          return new Promise<THREE.WebGLRenderer>(() => {})
+        }
+      }}
       dpr={[1, 2]}
     >
       <Rig />

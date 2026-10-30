@@ -188,7 +188,10 @@ const Body = memo(function Body({ blade }: { blade: Blade }) {
         // reaches the room the user is sitting in is granted.
         sandbox="allow-scripts allow-same-origin allow-presentation"
         allow="accelerometer; encrypted-media; picture-in-picture; fullscreen"
-        referrerPolicy="no-referrer"
+        // Not no-referrer: YouTube refuses an embed that does not say which
+        // site it is on (Error 153). This sends the origin only — the scheme,
+        // host and port of this page — never a path.
+        referrerPolicy="strict-origin-when-cross-origin"
         allowFullScreen
         title={blade.title}
       />

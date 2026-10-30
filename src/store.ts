@@ -240,8 +240,13 @@ type State = {
   expandedBlade: string | null
   /** JARVIS's control over his own appearance. UI_DEFAULTS == the stock look. */
   ui: UiState
+  faceId: FaceIdView | null
+  identity: IdentityState
 
   setVoice: (v: string) => void
+  setFaceId: (v: FaceIdView | null) => void
+  patchFaceId: (patch: Partial<FaceIdView>) => void
+  setIdentity: (id: IdentityState) => void
   setGestures: (on: boolean) => void
   setLooking: (why: string | null) => void
   setBootNote: (n: string) => void
@@ -287,8 +292,15 @@ export const useStore = create<State>((set) => ({
   expandedBlade: null,
   bootNote: '',
   ui: defaultUi(),
+  faceId: null,
+  identity: null,
 
   setVoice: (voice) => set({ voice }),
+  setFaceId: (faceId) => set({ faceId }),
+  // A patch to a closed popup is dropped: a scan finishing after Cancel must
+  // not bring the window back.
+  patchFaceId: (patch) => set((s) => (s.faceId ? { faceId: { ...s.faceId, ...patch } } : {})),
+  setIdentity: (identity) => set({ identity }),
   setGestures: (gestures) => set({ gestures }),
   setLooking: (looking) => set({ looking }),
   setBootNote: (bootNote) => set({ bootNote }),
@@ -415,6 +427,48 @@ export const useStore = create<State>((set) => ({
     }),
 }))
 
+/**
+ * The face popup, while it is open. null = closed.
+ *
+ * Kept here rather than in the component because three things need it: the
+ * popup draws it, the controller in lib/faceId.ts drives it, and the HUD shows
+ * that the camera is on because of it. The stage names are the statuses the
+ * popup shows, one to one.
+ */
+export type FaceIdStage =
+  | 'consent'      // enrolment only: what is stored, and a yes
+  | 'camera'       // Initializing camera…
+  | 'loading'      // loading the face models
+  | 'searching'    // no usable face yet
+  | 'detected'     // Face detected.
+  | 'recognizing'  // Recognizing…
+  | 'verified'     // Identity verified.
+  | 'rejected'     // Face not recognized.
+  | 'captured'     // enrolment: samples taken, waiting for the PIN
+  | 'enrolled'
+  | 'pin'          // manual fallback: PIN entry
+  | 'error'
+
+export type FaceIdView = {
+  mode: 'verify' | 'enroll'
+  stage: FaceIdStage
+  /** The line under the status: what to do next, or what went wrong. */
+  hint: string
+  /** The face box, as fractions of the frame, for the detection frame. */
+  box: [number, number, number, number] | null
+  progress: number
+  /** Face attempts used in this popup, against MAX_ATTEMPTS. */
+  attempts: number
+  score: number | null
+  /** Enrolment: face pictures taken as the head turned, as JPEG data URLs. */
+  photos?: string[]
+  /** Verify: the enrolled name, once matched. */
+  name?: string | null
+}
+
+/** Who was last verified, and how. Shown in the HUD; gates nothing yet. */
+export type IdentityState = { method: 'face' | 'pin'; at: number; name?: string | null } | null
+
 /** Colour identity per phase — shared by the 3D scene and the 2D HUD. */
 export const phaseColor: Record<Phase, string> = {
   offline: '#0d4a4a',
@@ -447,7 +501,7 @@ export function accentFor(phase: Phase, ui: UiState): string {
 //   __jarvis.addOrbit({ id: 'moon', src: '/vite.svg', radius: 0.6, speed: 8,
 //                       size: 90, tilt: 25, opacity: 1, phase: 0 })
 //   __jarvis.fireEffect('glitch'); __jarvis.resetUi()
-if (import.meta.env.DEV) {
+if (import.meta.env?.DEV && typeof window !== 'undefined') {
   // Not `useStore.getState()` directly: zustand replaces the state object on
   // every set, so a captured snapshot's *actions* keep working while every
   // data field reads forever as it was at module load. `__jarvis.phase` said

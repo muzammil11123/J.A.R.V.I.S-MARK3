@@ -47,6 +47,34 @@ body::after {
   z-index: 1;
 }
 
+/* The reactor when the browser has no WebGL to give (see Scene.tsx). */
+.scene-flat {
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.scene-flat-core {
+  --accent: #17b3b3;
+  width: min(34vmin, 320px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 55%, transparent) 0 14%, transparent 15% 58%, color-mix(in srgb, var(--accent) 18%, transparent) 70%, transparent 72%);
+  box-shadow: 0 0 40px color-mix(in srgb, var(--accent) 45%, transparent), inset 0 0 30px color-mix(in srgb, var(--accent) 30%, transparent);
+  transition: border-color 0.6s, box-shadow 0.6s;
+  animation: flat-breathe 4s ease-in-out infinite;
+}
+
+.scene-flat-core.busy {
+  animation-duration: 1.1s;
+}
+
+@keyframes flat-breathe {
+  0%, 100% { transform: scale(0.97); opacity: 0.8; }
+  50% { transform: scale(1.03); opacity: 1; }
+}
+
 /* --------------------------------------------------------------------- HUD */
 
 .hud {
@@ -1895,4 +1923,503 @@ kbd {
   object-fit: cover;
   transform: scaleX(-1);
   background: #000;
+}
+
+/* ── Approval prompt ─────────────────────────────────────────────
+   An action the bridge's policy will not run unasked. Above everything,
+   including the pointer layer, because nothing else on screen matters while
+   it is waiting. Amber rather than the interface accent: it must not read as
+   one more panel. */
+.approval {
+  --warn: #ffb547;
+  position: fixed;
+  left: 50%;
+  bottom: 2rem;
+  z-index: 100;
+  width: min(34rem, calc(100vw - 2rem));
+  transform: translateX(-50%);
+  padding: 0.9rem 1rem 1rem;
+  background: rgba(14, 9, 2, 0.96);
+  border: 1px solid var(--warn);
+  border-radius: 2px;
+  box-shadow: 0 0 28px color-mix(in srgb, var(--warn) 30%, transparent);
+  color: #f3e6d0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  pointer-events: auto;
+  backdrop-filter: blur(6px);
+}
+.approval-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  letter-spacing: 0.18em;
+  color: var(--warn);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  padding-bottom: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+.approval-risk { font-size: 0.68rem; padding: 0 0.4rem; border: 1px solid currentColor; }
+.approval-risk.risk-high, .approval-risk.risk-destructive { color: #ff5a4f; }
+.approval-reason { margin: 0 0 0.5rem; font-size: 0.85rem; }
+.approval-summary {
+  display: block;
+  max-height: 7.5rem;
+  overflow: auto;
+  padding: 0.5rem 0.6rem;
+  background: rgba(255, 255, 255, 0.06);
+  border-left: 2px solid var(--warn);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.approval-meta { margin-top: 0.5rem; color: #a99a83; font-size: 0.7rem; }
+.approval-actions { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 0.8rem; }
+.approval-actions button {
+  font: inherit;
+  letter-spacing: 0.1em;
+  padding: 0.45rem 0.9rem;
+  border-radius: 2px;
+  cursor: pointer;
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+.approval-actions .approval-yes { border-color: var(--warn); color: var(--warn); }
+.approval-actions button:hover { background: rgba(255, 255, 255, 0.08); }
+.approval-actions button:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
+.approval-actions kbd { margin-left: 0.4rem; font-size: 0.65rem; opacity: 0.7; }
+
+/* ----------------------------------------------------------------- console */
+/*
+ * The console (C), plus the two pieces that stay up without it: the mic
+ * readout and STOP. Same instrument styling as the diagnostics panel, but it
+ * takes pointer events, since it has controls.
+ */
+.console-toggle,
+.mic-readout,
+.stop-button {
+  position: fixed;
+  z-index: 30;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+}
+
+.console-toggle {
+  right: 1rem;
+  bottom: 1rem;
+  padding: 0.35rem 0.6rem;
+  background: rgba(2, 10, 12, 0.7);
+  color: var(--accent, #19d8d2);
+  border: 1px solid color-mix(in srgb, var(--accent, #19d8d2) 45%, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.console-toggle:focus-visible,
+.console button:focus-visible,
+.console select:focus-visible,
+.console input:focus-visible,
+.stop-button:focus-visible {
+  outline: 2px solid var(--accent, #19d8d2);
+  outline-offset: 2px;
+}
+
+.con-badge {
+  margin-left: 0.4rem;
+  padding: 0 0.35rem;
+  background: #ffb547;
+  color: #140c02;
+  border-radius: 2px;
+}
+
+.mic-readout {
+  left: 1rem;
+  bottom: 1rem;
+  max-width: calc(100vw - 14rem);
+  padding: 0.3rem 0.55rem;
+  background: rgba(2, 10, 12, 0.7);
+  color: #8fb3b0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mic-readout.on { color: var(--accent, #19d8d2); border-color: color-mix(in srgb, var(--accent, #19d8d2) 45%, transparent); }
+.mic-readout.warn { color: #ffb547; border-color: #ffb547; }
+
+.stop-button {
+  left: 1rem;
+  bottom: 3rem;
+  padding: 0.45rem 0.8rem;
+  background: rgba(30, 4, 4, 0.9);
+  color: #ff8a8a;
+  border: 1px solid #ff6b6b;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+.stop-button:hover { background: rgba(60, 6, 6, 0.95); }
+.stop-button kbd,
+.console-toggle kbd { opacity: 0.6; font-family: inherit; }
+
+.con-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.15rem;
+  border-radius: 50%;
+  vertical-align: 0.05rem;
+  background: #42504f;
+}
+.con-dot.on { background: #3ef2a8; box-shadow: 0 0 6px #3ef2a8; }
+.con-dot.warn { background: #ffb547; }
+
+.console {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  bottom: 3.2rem;
+  z-index: 40;
+  width: min(27rem, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  background: rgba(2, 10, 12, 0.95);
+  border: 1px solid var(--accent, #19d8d2);
+  border-radius: 2px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  color: #cfe6e3;
+  backdrop-filter: blur(6px);
+}
+
+.con-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 0.9rem 0.4rem;
+  letter-spacing: 0.18em;
+  color: var(--accent, #19d8d2);
+}
+
+.con-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  padding: 0 0.9rem 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.con-tabs button {
+  padding: 0.2rem 0.5rem;
+  background: none;
+  border: 1px solid transparent;
+  color: #6d8886;
+  font: inherit;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.con-tabs button.active { color: var(--accent, #19d8d2); border-color: color-mix(in srgb, var(--accent, #19d8d2) 45%, transparent); }
+
+.con-body { flex: 1; overflow-y: auto; padding: 0.2rem 0.9rem 0.9rem; }
+
+.con-sec {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin: 0.8rem 0 0.3rem;
+  letter-spacing: 0.16em;
+  color: #6d8886;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 0.45rem;
+}
+.con-sec:first-child { border-top: none; }
+
+.con-line { display: grid; grid-template-columns: 7.5rem 1fr; gap: 0.5rem; }
+.con-k { color: #6d8886; overflow-wrap: anywhere; }
+.con-v { overflow-wrap: anywhere; }
+.con-note { margin: 0.25rem 0; color: #8fa5a3; }
+.con-empty { color: #6d8886; font-style: italic; }
+.con-bad { color: #ff6b6b; }
+.con-dim { color: #6d8886; }
+.con-mono { font-variant-numeric: tabular-nums; }
+.con-row { display: flex; flex-wrap: wrap; gap: 0.6rem; padding-left: 8rem; color: #8fa5a3; }
+
+.con-link {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent, #19d8d2);
+  font: inherit;
+  letter-spacing: 0.06em;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.con-link.con-bad { color: #ff8a8a; }
+
+.con-btn {
+  margin: 0.35rem 0;
+  padding: 0.3rem 0.7rem;
+  background: color-mix(in srgb, var(--accent, #19d8d2) 14%, transparent);
+  color: var(--accent, #19d8d2);
+  border: 1px solid var(--accent, #19d8d2);
+  border-radius: 2px;
+  font: inherit;
+  cursor: pointer;
+}
+.con-btn.con-bad { color: #ff8a8a; border-color: #ff6b6b; background: rgba(60, 6, 6, 0.5); }
+
+.con-field { display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0; }
+.con-field > span:first-child { width: 4.5rem; color: #6d8886; }
+.con-field select,
+.con-field input[type='number'] {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.05);
+  color: #cfe6e3;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font: inherit;
+  padding: 0.15rem 0.3rem;
+}
+.con-field input[type='number'] { flex: 0 0 5rem; }
+.con-field input[type='range'] { flex: 1; accent-color: var(--accent, #19d8d2); }
+.con-field.con-stack { align-items: flex-start; }
+.con-field input[type='text'],
+.con-field textarea {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.05);
+  color: #cfe6e3;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font: inherit;
+  padding: 0.25rem 0.35rem;
+  resize: vertical;
+}
+.con-check { display: flex; gap: 0.5rem; align-items: flex-start; margin: 0.25rem 0; cursor: pointer; }
+.con-check input { accent-color: var(--accent, #19d8d2); margin-top: 0.25rem; }
+
+.con-steps,
+.con-mem,
+.con-hist,
+.con-plan { list-style: none; margin: 0; padding: 0; }
+.con-plan { list-style: decimal; padding-left: 1.2rem; }
+.con-plan .plan-completed { color: #3ef2a8; text-decoration: line-through; }
+.con-plan .plan-in_progress { color: var(--accent, #19d8d2); }
+
+.step {
+  display: grid;
+  grid-template-columns: 4.6rem 1fr auto;
+  gap: 0.2rem 0.5rem;
+  padding: 0.15rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.step-time { color: #56706e; font-variant-numeric: tabular-nums; }
+.step-tool { overflow-wrap: anywhere; }
+.step-reason { grid-column: 2 / -1; color: #8fa5a3; }
+.step-running .step-status { color: var(--accent, #19d8d2); }
+.step-awaiting-approval .step-status { color: #ffb547; }
+.step-ok .step-status { color: #3ef2a8; }
+.step-error .step-status,
+.step-denied .step-status { color: #ff6b6b; }
+.step-note { color: #8fa5a3; }
+
+.con-mem li,
+.con-hist li { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; padding: 0.2rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.con-tag { padding: 0 0.3rem; border: 1px solid rgba(255, 255, 255, 0.15); color: #8fa5a3; font-size: 0.64rem; }
+
+@media (max-width: 640px) {
+  .console { top: 0.5rem; right: 0.5rem; bottom: 2.8rem; width: calc(100vw - 1rem); }
+  .mic-readout { max-width: calc(100vw - 9rem); }
+  .con-line { grid-template-columns: 6rem 1fr; }
+  .con-row { padding-left: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .con-dot.on { box-shadow: none; }
+}
+
+/* Wi-Fi phone pairing in the console. */
+.con-pair { display: grid; grid-template-columns: 9.5rem 1fr; gap: 0.4rem 0.8rem; align-items: start; margin: 0.4rem 0; }
+.con-pair .con-note { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.con-qr { width: 9.5rem; height: 9.5rem; background: #fff; border-radius: 2px; image-rendering: pixelated; }
+.con-steps-help { margin: 0; padding-left: 1.1rem; color: #cfe6e3; }
+.con-steps-help li { margin-bottom: 0.2rem; }
+@media (max-width: 640px) { .con-pair { grid-template-columns: 1fr; } }
+
+/* ------------------------------------------------------------ face check */
+/*
+ * The face popup (F). A small floating instrument over the HUD, top right
+ * under the status — never a takeover. Rounded, unlike the rest of the
+ * chrome, so it reads as a window you can dismiss rather than part of the
+ * frame. Green and red only for the two verdicts.
+ */
+.faceid {
+  --ok: #3ef2a8;
+  --bad: #ff5a4f;
+  position: fixed;
+  top: 4.5rem;
+  right: 1.25rem;
+  z-index: 60;
+  width: min(20rem, calc(100vw - 2rem));
+  padding: 0.7rem 0.75rem 0.8rem;
+  background: color-mix(in srgb, var(--accent, #19d8d2) 7%, rgba(2, 9, 12, 0.92));
+  border: 1px solid color-mix(in srgb, var(--accent, #19d8d2) 45%, transparent);
+  border-radius: 14px;
+  box-shadow: 0 0 34px color-mix(in srgb, var(--accent, #19d8d2) 22%, transparent), 0 12px 40px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+  color: #cfe6e3;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  pointer-events: auto;
+}
+.faceid-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  letter-spacing: 0.2em;
+  font-size: 0.66rem;
+  color: var(--accent, #19d8d2);
+  margin-bottom: 0.55rem;
+}
+.faceid-x {
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent, #19d8d2) 35%, transparent);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.faceid-x:hover { background: rgba(255, 255, 255, 0.08); }
+
+.faceid-view {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--accent, #19d8d2) 14%, #020a0d), #010507 70%);
+  border: 1px solid color-mix(in srgb, var(--accent, #19d8d2) 25%, transparent);
+}
+.faceid-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* a mirror, as people expect to see themselves */
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+.faceid-view.live .faceid-video { opacity: 1; }
+.faceid-glyph {
+  position: absolute;
+  inset: 22% 32%;
+  border: 1px dashed color-mix(in srgb, var(--accent, #19d8d2) 50%, transparent);
+  border-radius: 46% 46% 42% 42%;
+  animation: faceidBreathe 2.4s ease-in-out infinite;
+}
+.faceid-ok .faceid-glyph { border: 2px solid var(--ok); box-shadow: 0 0 22px color-mix(in srgb, var(--ok) 45%, transparent); animation: none; }
+.faceid-bad .faceid-glyph { border-color: var(--bad); animation: none; }
+.faceid-scanline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 22%;
+  top: -22%;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--accent, #19d8d2) 32%, transparent) 85%, color-mix(in srgb, var(--accent, #19d8d2) 80%, white) 100%);
+  animation: faceidScan 2.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  pointer-events: none;
+}
+.faceid-box {
+  position: absolute;
+  border: 1.5px solid var(--accent, #19d8d2);
+  border-radius: 8px;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent, #19d8d2) 55%, transparent), inset 0 0 14px color-mix(in srgb, var(--accent, #19d8d2) 25%, transparent);
+  transition: left 0.12s linear, top 0.12s linear, width 0.12s linear, height 0.12s linear;
+}
+.faceid-corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 0 solid color-mix(in srgb, var(--accent, #19d8d2) 80%, white);
+}
+.faceid-corner.tl { top: 8px; left: 8px; border-top-width: 2px; border-left-width: 2px; border-top-left-radius: 6px; }
+.faceid-corner.tr { top: 8px; right: 8px; border-top-width: 2px; border-right-width: 2px; border-top-right-radius: 6px; }
+.faceid-corner.bl { bottom: 8px; left: 8px; border-bottom-width: 2px; border-left-width: 2px; border-bottom-left-radius: 6px; }
+.faceid-corner.br { bottom: 8px; right: 8px; border-bottom-width: 2px; border-right-width: 2px; border-bottom-right-radius: 6px; }
+
+.faceid-status { display: flex; flex-direction: column; gap: 0.15rem; margin-top: 0.6rem; min-height: 2.6rem; }
+.faceid-title { font-size: 0.86rem; letter-spacing: 0.06em; color: color-mix(in srgb, var(--accent, #19d8d2) 85%, white); }
+.faceid-status.faceid-ok .faceid-title { color: var(--ok); }
+.faceid-status.faceid-bad .faceid-title { color: var(--bad); }
+.faceid-hint { color: #9fb8b5; }
+.faceid-score { color: #6d8886; font-size: 0.66rem; }
+.faceid-dim { color: #6d8886; }
+
+.faceid-progress { height: 3px; margin-top: 0.4rem; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.faceid-progress > div { height: 100%; background: var(--accent, #19d8d2); box-shadow: 0 0 8px var(--accent, #19d8d2); transition: width 0.25s ease; }
+
+.faceid-consent p { margin: 0.2rem 0 0.5rem; }
+.faceid-photos { display: flex; gap: 0.4rem; margin-top: 0.6rem; }
+.faceid-photos img {
+  flex: 1 1 0;
+  min-width: 0;
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent, #19d8d2) 55%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent, #19d8d2) 25%, transparent);
+}
+.faceid-name {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.35);
+  color: inherit;
+  font: inherit;
+}
+.faceid-check { display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer; }
+.faceid-pin { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.5rem; }
+.faceid-pin input {
+  flex: 1 1 7rem;
+  min-width: 0;
+  font: inherit;
+  letter-spacing: 0.2em;
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent, #19d8d2) 40%, transparent);
+  background: rgba(0, 0, 0, 0.35);
+  color: inherit;
+}
+.faceid-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.45rem; margin-top: 0.7rem; }
+.faceid button:not(.faceid-x) {
+  font: inherit;
+  letter-spacing: 0.08em;
+  padding: 0.38rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.faceid button:not(.faceid-x):hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
+.faceid button:disabled { opacity: 0.4; cursor: not-allowed; }
+.faceid .faceid-primary { border-color: var(--accent, #19d8d2); color: var(--accent, #19d8d2); }
+.faceid button:focus-visible, .faceid input:focus-visible { outline: 2px solid var(--accent, #19d8d2); outline-offset: 2px; }
+.faceid kbd { margin-left: 0.3rem; font-size: 0.62rem; opacity: 0.6; font-family: inherit; }
+
+@keyframes faceidScan { to { top: 100%; } }
+@keyframes faceidBreathe { 50% { opacity: 0.45; transform: scale(0.97); } }
+@media (prefers-reduced-motion: reduce) {
+  .faceid-scanline, .faceid-glyph { animation: none; }
+  .faceid-scanline { top: 40%; opacity: 0.5; }
 }

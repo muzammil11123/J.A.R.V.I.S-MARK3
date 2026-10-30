@@ -146,8 +146,9 @@ const EMBED_FEATURES = new Set([
  * to choose.
  *
  * `referrerpolicy` because a proxied fetch already hides the user from the
- * origin server, and the embed hosts have no business being told which page
- * framed them either.
+ * origin server. Video players are the exception: YouTube now refuses to play
+ * an embed that arrives with no referrer at all (Error 153), so iframes send
+ * the origin — scheme, host and port, never a path — and nothing more.
  *
  * The three video attributes because a <video> without `controls` is a still
  * frame the user cannot start, and on iOS one without `playsinline` hijacks the
@@ -155,8 +156,11 @@ const EMBED_FEATURES = new Set([
  * several clips on it from pulling megabytes nobody asked for.
  */
 function hardenMedia(root: Element) {
-  root.querySelectorAll('img, video, iframe').forEach((el) => {
+  root.querySelectorAll('img, video').forEach((el) => {
     el.setAttribute('referrerpolicy', 'no-referrer')
+  })
+  root.querySelectorAll('iframe').forEach((el) => {
+    el.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin')
   })
 
   root.querySelectorAll('video').forEach((video) => {

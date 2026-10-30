@@ -84,6 +84,11 @@ export function watchCapture(
   if (usingBridge) bridge.watchCapture(fn)
 }
 
+/** "Who am I" — the bridge asks the page to run the face check. Bridge-only. */
+export function watchIdentify(fn: () => Promise<bridge.IdentifyResult>): void {
+  if (usingBridge) bridge.watchIdentify(fn)
+}
+
 /**
  * Barge-in. Stops the answer on both paths and settles whatever `ask()` call
  * is outstanding, so the caller's await always returns — on the bridge by

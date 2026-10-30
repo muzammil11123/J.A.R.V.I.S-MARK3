@@ -4,7 +4,12 @@ import { Hud } from './ui/Hud'
 import { Boot } from './ui/Boot'
 import { Ignition } from './ui/Ignition'
 import { Diagnostics } from './ui/Diagnostics'
+import { Approval } from './ui/Approval'
+import { Console } from './ui/Console'
+import { FaceIdPopup } from './ui/FaceId'
+import { NOT_RECOGNISED, closeFaceId, identifyMe, isWhoAmI, openFaceId } from './lib/faceId'
 import { useStore } from './store'
+import { getSettings } from './lib/settings'
 import { startVoice, type Voice, type VoiceMode } from './lib/voice'
 import { createSpeaker, cycleVoice, currentVoiceName } from './lib/tts'
 import * as sfx from './lib/sfx'
@@ -23,6 +28,7 @@ import {
   watchPanels,
   watchBlades,
   watchCapture,
+  watchIdentify,
   watchUi,
   watchConnection,
   connectedLabels,
@@ -55,6 +61,9 @@ const AWAIT_SPEECH_MS = 14000
  *  again to continue a thought. */
 const FOLLOW_UP_MS = 11000
 
+/** Speech this soon after a question is sent, before any answer, continues it. */
+const CONTINUATION_MS = 4000
+
 /** crypto.randomUUID needs a secure context, which a LAN address over plain
  *  http is not. Not worth failing a whole turn over an id. */
 const newId = () =>
@@ -82,6 +91,10 @@ export default function App() {
    * the phase, the speaker, or the busy state on its way to the floor.
    */
   const turn = useRef(0)
+  /** The last question sent, and when — to recognise a sentence cut in two. */
+  const lastAsked = useRef<{ text: string; at: number } | null>(null)
+  /** The first half of such a sentence, waiting for the rest. */
+  const carry = useRef<{ text: string; at: number } | null>(null)
   const booting = useRef(false)
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const voicePoll = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -111,6 +124,20 @@ export default function App() {
     s.setPhase('dormant')
   }
 
+  /**
+   * Stop everything: speech, the turn in flight and any tool it is running.
+   * goDormant alone only quietened this side; the bridge kept working on the
+   * task, so a stand-down could still end with a file moved.
+   */
+  const standDown = () => {
+    const phase = store.getState().phase
+    if (phase === 'offline') return
+    if (phase === 'thinking' || phase === 'tooling' || phase === 'speaking' || phase === 'listening' || phase === 'waking') {
+      interrupt()
+    }
+    goDormant()
+  }
+
   /** Open the mic and wait. `window` is how long before he gives up. */
   const listen = (window: number) => {
     clearIdle()
@@ -128,6 +155,7 @@ export default function App() {
     const stale = () => mine !== turn.current
 
     clearIdle()
+    lastAsked.current = { text: said, at: Date.now() }
     const s = store.getState()
     // Last turn's panels and blades go now, before the new answer starts
     // putting its own up. Anything the model marked sticky survives.
@@ -147,6 +175,26 @@ export default function App() {
     let filled = false
 
     try {
+      // "Who am I" is answered here, not by the model: the camera, the scan
+      // and the verdict are all on this side, and the reply must be exactly
+      // "Welcome back, <name>." or the not-recognised sentence — nothing a
+      // model might embellish, and never the name without a face match.
+      if (isWhoAmI(said)) {
+        store.getState().setPhase('tooling')
+        store.getState().setActiveTool('mcp__jarvis_eyes__who_am_i')
+        const r = await identifyMe()
+        if (stale()) return
+        const reply = r.say ?? NOT_RECOGNISED
+        store.getState().setActiveTool(null)
+        store.getState().setPhase('speaking')
+        store.getState().pushTurn({ id: turnId, role: 'jarvis', text: reply })
+        spk.say(reply)
+        await spk.end()
+        if (stale()) return
+        sfx.play(r.verified ? 'done' : 'error')
+        return
+      }
+
       const { text } = await ask(said, history.current, {
         onText: (delta) => {
           if (stale()) return
@@ -201,9 +249,16 @@ export default function App() {
       if (stale()) return
       console.error(err)
       sfx.play('error')
-      store
-        .getState()
-        .setError(err instanceof Error ? err.message : 'Something went wrong.')
+      const message = err instanceof Error ? err.message : 'Something went wrong.'
+      store.getState().setError(message)
+      // Said as well as shown: a voice assistant that fails silently looks
+      // exactly like one that did not hear you.
+      if (message.length < 160) {
+        const s = createSpeaker()
+        speaker.current = s
+        s.say(message)
+        await s.end().catch(() => {})
+      }
     } finally {
       if (!stale()) {
         speaker.current = null
@@ -227,7 +282,9 @@ export default function App() {
       case 'boot':
         return 'deaf'
       case 'dormant':
-        return 'wake'
+        // Hands-free off: nothing said while dormant is acted on, not even
+        // his name. Space still starts a turn.
+        return getSettings().handsFree ? 'wake' : 'deaf'
       case 'waking':
       case 'listening':
         return 'command'
@@ -276,6 +333,14 @@ export default function App() {
       phase === 'thinking' || phase === 'tooling' || phase === 'speaking'
 
     silence()
+    // Still talking just after the question went, before he said a word: the
+    // recogniser cut the sentence in two, so this is the rest of it, not an
+    // interruption. Keep the first half to join to what comes next — without
+    // this, every pause mid-sentence cancelled the question and lost its start.
+    const asked = lastAsked.current
+    if (phase === 'thinking' && asked && Date.now() - asked.at < CONTINUATION_MS) {
+      carry.current = { text: asked.text, at: Date.now() }
+    }
     if (wasBusy) {
       // Abandon the answer in flight. The turn counter moves in respond()'s
       // replacement; bumping it here covers the case where nothing replaces it.
@@ -299,11 +364,15 @@ export default function App() {
       listen(AWAIT_SPEECH_MS)
       return
     }
-    const said = text.replace(LEADING_NAME, '').trim()
+    let said = text.replace(LEADING_NAME, '').trim()
     if (!said) {
       listen(AWAIT_SPEECH_MS)
       return
     }
+    // The first half of a sentence the recogniser split; see onSpeechStart.
+    const held = carry.current
+    carry.current = null
+    if (held && Date.now() - held.at < 15_000) said = `${held.text} ${said}`
 
     void respond(said)
   }
@@ -373,6 +442,10 @@ export default function App() {
      * appears with no explanation is exactly the thing that makes people
      * distrust an assistant — so the interface says it before they have to ask.
      */
+    // "Who am I": the face popup runs the check and the answer goes back to
+    // JARVIS, who says the enrolled name.
+    watchIdentify(identifyMe)
+
     watchCapture(async (req) => {
       const note =
         req.mode === 'watch'
@@ -629,6 +702,17 @@ export default function App() {
         return
       }
 
+      // F opens the face check. Like G, the camera is never turned on for it
+      // except by asking, and it goes off again the moment the check is done.
+      if (e.key === 'f' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const phase = store.getState().phase
+        if (!getSettings().faceId || phase === 'offline' || phase === 'boot') return
+        e.preventDefault()
+        if (store.getState().faceId) closeFaceId()
+        else openFaceId('verify')
+        return
+      }
+
       // T speaks a fixed line, bypassing the wake word, the recogniser and the
       // model entirely. When "I can't hear him" is the report, this is the one
       // keypress that separates a broken voice engine from a broken voice loop
@@ -655,7 +739,7 @@ export default function App() {
       // no key for at all.
       if (e.key === 'Escape') {
         e.preventDefault()
-        if (store.getState().phase !== 'offline') goDormant()
+        standDown()
         return
       }
 
@@ -682,15 +766,34 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
 
+    // The console's STOP button: the same as Escape, from a click.
+    const onStop = () => standDown()
+    window.addEventListener('jarvis:stop', onStop)
+
+    // A different microphone was chosen, or one came back after being pulled
+    // out. The voice loop's audio graph belongs to the old stream, so it is
+    // rebuilt on the new one rather than left listening to nothing.
+    const onMicChanged = () => {
+      if (!voice.current) return
+      voice.current.stop()
+      void startVoice({ mode, onWake, onSpeechStart, onPartial, onUtterance, onError: onVoiceError }).then((v) => {
+        voice.current = v
+      })
+    }
+    window.addEventListener('jarvis:mic-changed', onMicChanged)
+
     return () => {
       cancelAnimationFrame(raf)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('jarvis:stop', onStop)
+      window.removeEventListener('jarvis:mic-changed', onMicChanged)
       clearIdle()
       if (voicePoll.current) clearInterval(voicePoll.current)
       voice.current?.stop()
       speaker.current?.cancel()
       // The camera must not outlive the page that turned it on.
       hands.disableHands()
+      closeFaceId()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -701,6 +804,9 @@ export default function App() {
       <Hud />
       <Boot />
       <Diagnostics />
+      <Approval />
+      <Console />
+      <FaceIdPopup />
       <Ignition onStart={() => void powerOn()} />
     </>
   )

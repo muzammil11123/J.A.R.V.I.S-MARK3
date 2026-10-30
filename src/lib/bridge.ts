@@ -35,6 +35,36 @@ type Frame = {
   seconds?: number
   when?: string
   servers?: Array<string | { name?: string }>
+  tool?: string
+  risk?: string
+  summary?: string
+  status?: string
+  note?: string
+  at?: number
+  todos?: Array<{ text: string; status: string }>
+}
+
+/**
+ * One tool call as the timeline sees it: decided, waiting on approval,
+ * running, finished, failed or refused. Sent by the bridge's policy and
+ * result hooks for every tool, so nothing runs off the record.
+ */
+export type Step = {
+  id?: string
+  tool: string
+  status: 'running' | 'awaiting-approval' | 'denied' | 'ok' | 'error' | 'note'
+  reason?: string
+  risk?: string
+  note?: string
+  at: number
+}
+export type PlanItem = { text: string; status: string }
+
+let onStep: ((s: Step) => void) | null = null
+let onPlan: ((todos: PlanItem[]) => void) | null = null
+export function watchActivity(step: (s: Step) => void, plan: (todos: PlanItem[]) => void) {
+  onStep = step
+  onPlan = plan
 }
 
 /** Every question gets an id so its answer can be told from anyone else's. */
@@ -81,6 +111,48 @@ export type CaptureResult = { data?: string; mimeType?: string; error?: string }
 let onCapture: ((req: CaptureRequest) => Promise<CaptureResult>) | null = null
 export function watchCapture(fn: (req: CaptureRequest) => Promise<CaptureResult>) {
   onCapture = fn
+}
+
+/** "Who am I": the bridge asks the page to run the face check and report back. */
+export type IdentifyResult = {
+  verified: boolean
+  name?: string | null
+  /** The person's own profile note; present only after a face match. */
+  personality?: string
+  method?: 'face' | 'pin'
+  error?: string
+  /** Why it did not verify, so the spoken answer can be the right one. */
+  reason?: 'no-match' | 'timeout' | 'camera' | 'not-enrolled' | 'locked' | 'closed' | 'unavailable' | 'disabled'
+  /** The sentence to speak, already worded. */
+  say?: string
+}
+
+let onIdentify: (() => Promise<IdentifyResult>) | null = null
+export function watchIdentify(fn: () => Promise<IdentifyResult>) {
+  onIdentify = fn
+}
+
+/**
+ * An action the bridge's policy will not run without a yes from the person —
+ * a delete, an overwrite, a kill, an install, anything sent off the machine.
+ * Resolves true only on an explicit approval; anything else is a no.
+ */
+export type ConfirmRequest = {
+  id: string
+  tool: string
+  risk: string
+  reason: string
+  summary: string
+}
+
+let onConfirm: ((req: ConfirmRequest) => Promise<boolean>) | null = null
+let onConfirmCancel: ((id: string) => void) | null = null
+export function watchConfirm(
+  fn: (req: ConfirmRequest) => Promise<boolean>,
+  cancel: (id: string) => void,
+) {
+  onConfirm = fn
+  onConfirmCancel = cancel
 }
 
 /** Blades arrive the same way panels do — pushed mid-turn, so the article is
@@ -203,6 +275,56 @@ function dispatch(ws: WebSocket) {
           .then(reply)
           .catch((err) => reply({ error: String(err?.message ?? err) }))
       }
+    } else if (msg.type === 'identify' && msg.id) {
+      const id = msg.id
+      const reply = (payload: IdentifyResult) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'reply', id, ...payload }))
+        }
+      }
+      // Always answers, for the same reason as a capture: a turn is waiting.
+      if (!onIdentify) reply({ verified: false, error: 'The interface has no face check.' })
+      else
+        onIdentify()
+          .then(reply)
+          .catch((err) => reply({ verified: false, error: String(err?.message ?? err) }))
+    } else if (msg.type === 'confirm' && msg.id) {
+      const id = msg.id
+      const reply = (approved: boolean) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'reply', id, approved }))
+        }
+      }
+      // No prompt to show it on means no way to say yes.
+      if (!onConfirm) reply(false)
+      else
+        onConfirm({
+          id,
+          tool: msg.tool ?? '',
+          risk: msg.risk ?? '',
+          reason: msg.reason ?? '',
+          summary: msg.summary ?? '',
+        })
+          .then(reply)
+          .catch(() => reply(false))
+    } else if (msg.type === 'confirm-cancel' && msg.id) {
+      onConfirmCancel?.(msg.id)
+    } else if (msg.type === 'step' && msg.tool && msg.status) {
+      onStep?.({
+        id: msg.id,
+        tool: msg.tool,
+        status: msg.status as Step['status'],
+        reason: msg.reason,
+        risk: msg.risk,
+        at: msg.at ?? Date.now(),
+      })
+    } else if (msg.type === 'step-note' && msg.tool) {
+      onStep?.({ tool: msg.tool, status: 'note', note: msg.note, at: msg.at ?? Date.now() })
+    } else if (msg.type === 'plan' && Array.isArray(msg.todos)) {
+      onPlan?.(msg.todos)
+    } else if (msg.type === 'phone-pairing') {
+      // Pairing started (by voice or by click): the console shows the QR code.
+      window.dispatchEvent(new CustomEvent('jarvis:open-console', { detail: { tab: 'connections' } }))
     } else if (msg.type === 'ui' && msg.op) {
       // A `ui` frame with no args is normal — reset and clear take none — so an
       // absent args object is an empty one, not a reason to drop the command.

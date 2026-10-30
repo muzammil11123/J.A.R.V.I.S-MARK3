@@ -81,7 +81,7 @@ const WAKE =
   /\b(?:hey|hi|ok|okay|yo)?\s*(?:jarvis|jarvys|jervis|jarvis's|travis|jarviss|java's|jarv)\b(?!'s)/i
 
 /** Everything after the wake phrase, which is usually the actual command. */
-function afterWake(text: string): string {
+export function afterWake(text: string): string {
   const m = WAKE.exec(text)
   if (!m) return ''
   return text
@@ -154,19 +154,31 @@ const SELF_GUARD_MS = 350
  */
 const SETTLE_MS = 250
 /** ...and this long when the sentence is plainly unfinished. */
-const CONTINUE_MS = 1600
+const CONTINUE_MS = 1100
 /**
  * Nothing is held longer than this in total. A ceiling rather than a timer:
  * without it, someone who ends every clause on "and" could hold a turn open
  * for ever, and the assistant would look like it had stopped listening.
  */
-const MAX_HOLD_MS = 6000
+const MAX_HOLD_MS = 4500
+
+/**
+ * The browser recogniser's own silence gate, by how finished the words look.
+ * A complete-looking sentence goes after a short breath; one that ends on
+ * "and" or "the" gets the longer window. This, not the assembler, is where the
+ * browser path waits, so its assembler adds no settle time on top.
+ */
+// 550 ms proved too short: Chrome delivers words in bursts, sometimes more
+// than half a second apart mid-sentence, so questions went off half-finished
+// and the rest of the sentence then cancelled them as a barge-in.
+const BROWSER_DONE_MS = 900
+const BROWSER_UNFINISHED_MS = 1200
 
 /**
  * How long to keep waiting, given what has been said so far.
  * 0 means "this is a complete thought, send it now".
  */
-function holdFor(text: string): number {
+export function holdFor(text: string, settleMs = SETTLE_MS): number {
   const words = text.trim().split(/\s+/).filter(Boolean)
   if (!words.length) return CONTINUE_MS
   // An explicit terminator is the speaker telling us they are done.
@@ -176,7 +188,7 @@ function holdFor(text: string): number {
   // One or two words is usually the start of something, not the whole of it —
   // except for the short commands that genuinely are complete.
   if (words.length <= 2 && !OVERRIDE.test(text)) return CONTINUE_MS
-  return SETTLE_MS
+  return settleMs
 }
 
 type Assembler = {
@@ -192,6 +204,8 @@ type Assembler = {
 function makeAssembler(h: {
   emit: (text: string) => void
   partial: (text: string) => void
+  /** Extra quiet to wait for after a finished-looking sentence. */
+  settleMs?: number
 }): Assembler {
   let held = ''
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -229,7 +243,7 @@ function makeAssembler(h: {
       }
 
       const wait = Math.min(
-        holdFor(held),
+        holdFor(held, h.settleMs),
         Math.max(0, MAX_HOLD_MS - (Date.now() - firstAt)),
       )
       diag.waitedMs = wait
@@ -294,7 +308,7 @@ const STOP = new Set(
  * mangles its own playback badly enough that a substring match rarely holds,
  * but the *words* survive.
  */
-function isEcho(heard: string, spoken: string): boolean {
+export function isEcho(heard: string, spoken: string): boolean {
   if (!spoken) return false
   if (OVERRIDE.test(heard)) return false
 
@@ -627,6 +641,8 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
       h.onUtterance(text)
     },
     partial: (text) => h.onPartial(text),
+    // The silence gate below has already waited; waiting again is pure delay.
+    settleMs: 0,
   })
 
   const touch = () => {
@@ -678,9 +694,11 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
 
   const bumpSilence = () => {
     clearSilence()
-    // Endpoint on a short quiet gap; the ElevenLabs path tunes this more
-    // finely, but a fixed window is plenty for the fallback.
-    silenceTimer = setTimeout(emit, 900)
+    // Endpoint on a quiet gap sized by the words so far: short when the
+    // sentence already sounds finished, longer when it plainly is not.
+    const sofar = `${assemble.held()} ${settled} ${interim}`.trim()
+    const done = holdFor(sofar, 0) === 0
+    silenceTimer = setTimeout(emit, done ? BROWSER_DONE_MS : BROWSER_UNFINISHED_MS)
   }
 
   const onResult = (e: any) => {
